@@ -165,6 +165,14 @@ async def birthday_status(
         )
 
 
+@group.command(name="announce", description="Trigger today's birthday announcements now")
+async def birthday_announce(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    today_et = datetime.datetime.now(ET).date()
+    await announce(client, interaction.guild, today_et, today_et)
+    await interaction.followup.send("Done — any unannounced birthdays today have been posted.", ephemeral=True)
+
+
 client.tree.add_command(group)
 
 
