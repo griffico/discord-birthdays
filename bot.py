@@ -3,6 +3,7 @@ import logging
 import os
 from zoneinfo import ZoneInfo
 
+import aiohttp
 from typing import Optional
 
 import discord
@@ -16,6 +17,7 @@ import storage
 load_dotenv()
 TOKEN = os.environ["DISCORD_TOKEN"]
 CATCHUP_DAYS = int(os.getenv("CATCHUP_DAYS", "7"))
+GIPHY_API_KEY = os.getenv("GIPHY_API_KEY")
 ET = ZoneInfo("America/New_York")
 
 logging.basicConfig(
@@ -186,6 +188,24 @@ async def daily_check(bot: discord.Client) -> None:
         await announce(bot, guild, today_et, today_et)
 
 
+# ── Giphy ─────────────────────────────────────────────────────────────────────
+
+async def fetch_birthday_gif() -> Optional[str]:
+    if not GIPHY_API_KEY:
+        return None
+    url = "https://api.giphy.com/v1/gifs/random"
+    params = {"api_key": GIPHY_API_KEY, "tag": "funny happy birthday", "rating": "pg"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data["data"]["images"]["original"]["url"]
+    except Exception as e:
+        log.warning("Failed to fetch Giphy GIF: %s", e)
+    return None
+
+
 # ── Announcement core ─────────────────────────────────────────────────────────
 
 async def announce(
@@ -224,6 +244,10 @@ async def announce(
             msg = f"🎂 Belated happy birthday, {mention}! (Their birthday was {target_date.isoformat()})"
         else:
             msg = f"🎉 Happy birthday, {mention}!"
+
+        gif_url = await fetch_birthday_gif()
+        if gif_url:
+            msg = f"{msg}\n{gif_url}"
 
         try:
             await channel.send(msg)
