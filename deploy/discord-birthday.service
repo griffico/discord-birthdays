@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/pi/discord-birthday
-ExecStart=/home/pi/discord-birthday/.venv/bin/python bot.py
+WorkingDirectory=/home/pi/repos/discord-birthdays
+ExecStart=/home/pi/repos/discord-birthdays/.venv/bin/python bot.py
 Restart=on-failure
 RestartSec=10
 User=pi
