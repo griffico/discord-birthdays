@@ -1,0 +1,240 @@
+import datetime
+import logging
+import os
+from zoneinfo import ZoneInfo
+
+from typing import Optional
+
+import discord
+import discord.ext.tasks
+from discord import app_commands
+from discord.ext import tasks
+from dotenv import load_dotenv
+
+import storage
+
+load_dotenv()
+TOKEN = os.environ["DISCORD_TOKEN"]
+CATCHUP_DAYS = int(os.getenv("CATCHUP_DAYS", "7"))
+ET = ZoneInfo("America/New_York")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger(__name__)
+
+
+class BirthdayBot(discord.Client):
+    def __init__(self) -> None:
+        intents = discord.Intents.default()
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self) -> None:
+        await self.tree.sync()
+        log.info("Command tree synced globally (may take up to 1 hour to propagate)")
+
+    async def on_ready(self) -> None:
+        log.info("Logged in as %s (id %s)", self.user, self.user.id)
+        if not daily_check.is_running():
+            await self._run_catchup()
+            daily_check.start(self)
+
+    async def _run_catchup(self) -> None:
+        today_et = datetime.datetime.now(ET).date()
+        for offset in range(CATCHUP_DAYS - 1, -1, -1):
+            target = today_et - datetime.timedelta(days=offset)
+            for guild in self.guilds:
+                await announce(self, guild, target, today_et)
+
+
+client = BirthdayBot()
+
+
+# ── Slash commands ────────────────────────────────────────────────────────────
+
+group = app_commands.Group(name="birthday", description="Birthday bot commands")
+
+
+def parse_birthday(value: str) -> Optional[str]:
+    value = value.strip()
+    for fmt in ("%m-%d", "%m/%d", "%B %d", "%b %d", "%B %dst", "%B %dnd", "%B %drd", "%B %dth"):
+        try:
+            dt = datetime.datetime.strptime(value, fmt)
+            return dt.strftime("%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+@group.command(name="set", description="Register your birthday (e.g. 03-14, 03/14, January 16)")
+@app_commands.describe(date="Your birthday — try MM-DD, MM/DD, or 'January 16'")
+async def birthday_set(interaction: discord.Interaction, date: str) -> None:
+    mmdd = parse_birthday(date)
+    if mmdd is None:
+        await interaction.response.send_message(
+            "Couldn't parse that date. Try `03-14`, `03/14`, or `March 14`.", ephemeral=True
+        )
+        return
+    storage.set_birthday(interaction.guild_id, interaction.user.id, mmdd)
+    await interaction.response.send_message(
+        f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.",
+        ephemeral=True,
+    )
+
+
+@group.command(name="remove", description="Remove your birthday and opt out of announcements")
+async def birthday_remove(interaction: discord.Interaction) -> None:
+    removed = storage.remove_birthday(interaction.guild_id, interaction.user.id)
+    if removed:
+        await interaction.response.send_message(
+            "Your birthday has been removed.", ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            "You don't have a birthday registered.", ephemeral=True
+        )
+
+
+@group.command(name="channel", description="Set the channel for birthday announcements")
+@app_commands.describe(channel="The channel to post announcements in (defaults to current channel)")
+async def birthday_channel(
+    interaction: discord.Interaction,
+    channel: Optional[discord.TextChannel] = None,
+) -> None:
+    target = channel or interaction.channel
+    storage.set_channel(interaction.guild_id, target.id)
+    await interaction.response.send_message(
+        f"Birthday announcements will be posted in {target.mention}.", ephemeral=True
+    )
+
+
+@group.command(name="list", description="List all registered birthdays in this server")
+async def birthday_list(interaction: discord.Interaction) -> None:
+    birthdays = storage.all_birthdays(interaction.guild_id)
+    if not birthdays:
+        await interaction.response.send_message(
+            "No birthdays registered yet. Use `/birthday set` to add yours!", ephemeral=True
+        )
+        return
+
+    lines = []
+    for uid, mmdd in sorted(birthdays.items(), key=lambda x: x[1]):
+        lines.append(f"<@{uid}> — {mmdd}")
+
+    await interaction.response.send_message(
+        "**Registered birthdays:**\n" + "\n".join(lines), ephemeral=True
+    )
+
+
+@group.command(name="status", description="Show recent birthdays and whether notices were sent")
+@app_commands.describe(days="How many days back to check (default 7)")
+async def birthday_status(
+    interaction: discord.Interaction, days: int = 7
+) -> None:
+    days = max(1, min(days, 30))
+    today_et = datetime.datetime.now(ET).date()
+    lines = []
+
+    for offset in range(days - 1, -1, -1):
+        target = today_et - datetime.timedelta(days=offset)
+        mmdd = target.strftime("%m-%d")
+        members = storage.birthdays_on(interaction.guild_id, mmdd)
+
+        if not members and target.month == 2 and target.day == 28:
+            members = members + storage.birthdays_on(interaction.guild_id, "02-29")
+
+        if not members:
+            continue
+
+        for uid in members:
+            wished = storage.was_wished(interaction.guild_id, target, uid)
+            status_icon = "✅" if wished else "❌"
+            label = "today" if offset == 0 else target.isoformat()
+            lines.append(f"{status_icon} <@{uid}> — {mmdd} ({label})")
+
+    if not lines:
+        await interaction.response.send_message(
+            f"No birthdays in the last {days} day(s).", ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"**Birthday status (last {days} day(s)):**\n" + "\n".join(lines),
+            ephemeral=True,
+        )
+
+
+client.tree.add_command(group)
+
+
+# ── Daily scheduler ───────────────────────────────────────────────────────────
+
+@tasks.loop(time=datetime.time(hour=12, tzinfo=ET))
+async def daily_check(bot: discord.Client) -> None:
+    today_et = datetime.datetime.now(ET).date()
+    log.info("Daily check firing for %s", today_et)
+    for guild in bot.guilds:
+        await announce(bot, guild, today_et, today_et)
+
+
+# ── Announcement core ─────────────────────────────────────────────────────────
+
+async def announce(
+    bot: discord.Client,
+    guild: discord.Guild,
+    target_date: datetime.date,
+    today: datetime.date,
+) -> None:
+    channel_id = storage.get_channel(guild.id)
+    if not channel_id:
+        return
+
+    mmdd = target_date.strftime("%m-%d")
+    members = storage.birthdays_on(guild.id, mmdd)
+
+    # Handle Feb 29 in non-leap years: announce on Feb 28
+    if not members and target_date.month == 2 and target_date.day == 28:
+        members = storage.birthdays_on(guild.id, "02-29")
+
+    if not members:
+        return
+
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        log.warning("Channel %s not found in guild %s", channel_id, guild.id)
+        return
+
+    is_belated = target_date < today
+
+    for uid in members:
+        if storage.was_wished(guild.id, target_date, uid):
+            continue
+
+        mention = f"<@{uid}>"
+        if is_belated:
+            msg = f"🎂 Belated happy birthday, {mention}! (Their birthday was {target_date.isoformat()})"
+        else:
+            msg = f"🎉 Happy birthday, {mention}!"
+
+        try:
+            await channel.send(msg)
+            storage.mark_wished(guild.id, target_date, uid)
+            log.info(
+                "Announced %s birthday for user %s in guild %s (channel %s)",
+                "belated" if is_belated else "on-day",
+                uid,
+                guild.id,
+                channel_id,
+            )
+        except discord.Forbidden:
+            log.error("No permission to post in channel %s (guild %s)", channel_id, guild.id)
+        except discord.HTTPException as e:
+            log.error("Failed to post birthday message: %s", e)
+
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    storage.load()
+    client.run(TOKEN)
