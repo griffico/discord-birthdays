@@ -229,8 +229,7 @@ async def birthday_help(interaction: discord.Interaction) -> None:
         "`/birthday list` — See everyone's registered birthdays.\n"
         "`/birthday status` — See recent birthdays and whether they were announced.\n\n"
         "**Privacy**\n"
-        "A week before your birthday, the bot will send you a private DM with the option to skip or remove yourself — "
-        "no need to run a command if you'd rather not be announced.",
+        "A week before your birthday, the bot will send you a private DM with the option to skip or remove yourself.",
         ephemeral=True,
     )
 
