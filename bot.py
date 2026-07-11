@@ -19,6 +19,7 @@ TOKEN = os.environ["DISCORD_TOKEN"]
 CATCHUP_DAYS = int(os.getenv("CATCHUP_DAYS", "7"))
 PREVIEW_DAYS = 7
 GIPHY_API_KEY = os.getenv("GIPHY_API_KEY")
+GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") else None
 ET = ZoneInfo("America/New_York")
 
 logging.basicConfig(
@@ -114,6 +115,11 @@ class BirthdayBot(discord.Client):
 
     async def setup_hook(self) -> None:
         self.add_dynamic_items(SkipButton, RemoveButton)
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            log.info("Command tree synced to guild %s (instant)", GUILD_ID)
         await self.tree.sync()
         log.info("Command tree synced globally (may take up to 1 hour to propagate)")
 
