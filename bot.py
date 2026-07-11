@@ -182,7 +182,8 @@ async def birthday_set(interaction: discord.Interaction, date: str) -> None:
     storage.set_birthday(interaction.guild_id, interaction.user.id, mmdd)
     storage.clear_wished(interaction.guild_id, str(interaction.user.id))
     await interaction.followup.send(
-        f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.",
+        f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.\n"
+        f"-# Only you can see this message.",
         ephemeral=True,
     )
 
