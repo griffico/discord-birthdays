@@ -114,5 +114,13 @@ def mark_preview_sent(guild_id: int, user_id: str, year: int) -> None:
     save()
 
 
+def clear_guild(guild_id: int) -> None:
+    gid = str(guild_id)
+    if gid in _data["guilds"]:
+        channel_id = _data["guilds"][gid].get("channel_id")
+        _data["guilds"][gid] = {"channel_id": channel_id, "birthdays": {}, "last_wished": {}}
+        save()
+
+
 def all_guild_ids() -> list:
     return [int(gid) for gid in _data["guilds"]]

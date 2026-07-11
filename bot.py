@@ -218,6 +218,13 @@ async def birthday_admin_set(interaction: discord.Interaction, member: discord.M
     )
 
 
+@group.command(name="admin-clear", description="Reset all birthday data for this server")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def birthday_admin_clear(interaction: discord.Interaction) -> None:
+    storage.clear_guild(interaction.guild_id)
+    await interaction.response.send_message("All birthday data for this server has been cleared.", ephemeral=True)
+
+
 @group.command(name="preview", description="Send preview DMs now to anyone with a birthday in the next 7 days")
 async def birthday_preview(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
