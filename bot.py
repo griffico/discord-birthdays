@@ -243,35 +243,37 @@ async def daily_check(bot: discord.Client) -> None:
 # ── Preview DMs ───────────────────────────────────────────────────────────────
 
 async def send_preview_dms(bot: discord.Client, guild: discord.Guild, today: datetime.date) -> None:
-    preview_date = today + datetime.timedelta(days=PREVIEW_DAYS)
-    mmdd = preview_date.strftime("%m-%d")
-    members = storage.birthdays_on(guild.id, mmdd)
+    for offset in range(1, PREVIEW_DAYS + 1):
+        preview_date = today + datetime.timedelta(days=offset)
+        mmdd = preview_date.strftime("%m-%d")
+        members = storage.birthdays_on(guild.id, mmdd)
 
-    for uid in members:
-        year = preview_date.year
-        if storage.was_preview_sent(guild.id, uid, year):
-            continue
-        if storage.was_skipped(guild.id, uid, year):
-            continue
+        for uid in members:
+            year = preview_date.year
+            if storage.was_preview_sent(guild.id, uid, year):
+                continue
+            if storage.was_skipped(guild.id, uid, year):
+                continue
 
-        member = guild.get_member(int(uid))
-        if member is None:
-            continue
+            member = guild.get_member(int(uid))
+            if member is None:
+                continue
 
-        view = OptOutView(guild_id=guild.id, user_id=uid, year=year)
-        try:
-            await member.send(
-                f"👋 Hey! Just a heads up — your birthday ({mmdd}) is coming up in {PREVIEW_DAYS} days "
-                f"and we'll be posting a announcement in **{guild.name}**. "
-                f"If you'd rather skip it this year or opt out entirely, use the buttons below.",
-                view=view,
-            )
-            storage.mark_preview_sent(guild.id, uid, year)
-            log.info("Sent preview DM to user %s in guild %s", uid, guild.id)
-        except discord.Forbidden:
-            log.warning("Could not DM user %s (DMs disabled)", uid)
-        except discord.HTTPException as e:
-            log.error("Failed to send preview DM to user %s: %s", uid, e)
+            days_away = offset
+            view = OptOutView(guild_id=guild.id, user_id=uid, year=year)
+            try:
+                await member.send(
+                    f"👋 Hey! Just a heads up — your birthday ({mmdd}) is coming up in {days_away} day(s) "
+                    f"and we'll be posting an announcement in **{guild.name}**. "
+                    f"If you'd rather skip it this year or opt out entirely, use the buttons below.",
+                    view=view,
+                )
+                storage.mark_preview_sent(guild.id, uid, year)
+                log.info("Sent preview DM to user %s in guild %s (%s days away)", uid, guild.id, days_away)
+            except discord.Forbidden:
+                log.warning("Could not DM user %s (DMs disabled)", uid)
+            except discord.HTTPException as e:
+                log.error("Failed to send preview DM to user %s: %s", uid, e)
 
 
 # ── Giphy ─────────────────────────────────────────────────────────────────────
