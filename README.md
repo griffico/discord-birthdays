@@ -4,20 +4,25 @@ A Discord bot that announces team birthdays at 8:00 AM Eastern Time. Members opt
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `/birthday set MM-DD` | Register your birthday (e.g. `03-14`). This opts you in. |
-| `/birthday remove` | Remove your birthday and opt out of announcements. |
-| `/birthday channel [#channel]` | Set where announcements are posted (defaults to current channel). |
-| `/birthday list` | Show all registered birthdays for this server. |
-| `/birthday status [days]` | Show recent birthdays and whether each notice was sent (✅/❌). |
+| Command | Who can use | Description |
+|---|---|---|
+| `/birthday set <date>` | Anyone | Register your birthday (e.g. `03-14`, `03/14`, `March 14`). Opts you in. |
+| `/birthday remove` | Anyone | Remove your birthday and opt out permanently. |
+| `/birthday skip` | Anyone | Skip this year's announcement only. Resumes next year automatically. |
+| `/birthday channel [#channel]` | Anyone | Set where announcements are posted (defaults to current channel). |
+| `/birthday list` | Anyone | Show all registered birthdays for this server. |
+| `/birthday status [days]` | Anyone | Show recent birthdays and whether each notice was sent (✅/❌). |
+| `/birthday admin-set @member <date>` | Manage Server | Set a birthday on behalf of another member. |
+| `/birthday admin-clear` | Manage Server | Reset all birthday data for this server. |
+| `/birthday announce` | Manage Server | Trigger today's birthday announcements immediately. |
+| `/birthday preview` | Manage Server | Send preview DMs now to anyone with a birthday in the next 7 days. |
 
 ## Setup
 
 ### Prerequisites
 - Python 3.8 or newer (`python3 --version`)
 - A Discord bot application with a valid token ([Discord Developer Portal](https://discord.com/developers/applications))
-- Bot invited to your server with `bot` and `applications.commands` scopes
+- Bot invited to your server with `bot` and `applications.commands` scopes and **Send Messages** permission enabled (OAuth2 tab → Bot → check Send Messages)
 
 ### Install
 
