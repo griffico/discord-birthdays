@@ -103,6 +103,11 @@ def clear_skip(guild_id: int, user_id: str) -> None:
     save()
 
 
+def clear_wished(guild_id: int, user_id: str) -> None:
+    _guild(guild_id).get("last_wished", {}).pop(user_id, None)
+    save()
+
+
 # ── Preview DM tracking ───────────────────────────────────────────────────────
 
 def was_preview_sent(guild_id: int, user_id: str, year: int) -> bool:

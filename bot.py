@@ -1,11 +1,11 @@
 import datetime
 import logging
 import os
+import re
 from zoneinfo import ZoneInfo
-
-import aiohttp
 from typing import Optional
 
+import aiohttp
 import discord
 import discord.ext.tasks
 from discord import app_commands
@@ -28,6 +28,66 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+# ── Persistent opt-out buttons ────────────────────────────────────────────────
+# custom_ids encode all context so buttons survive bot restarts.
+
+class SkipButton(discord.ui.DynamicItem[discord.ui.Button], template=r"bday:skip:(?P<guild_id>\d+):(?P<year>\d+)"):
+    def __init__(self, guild_id: int, year: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Skip this year",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"bday:skip:{guild_id}:{year}",
+            )
+        )
+        self.guild_id = guild_id
+        self.year = year
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match) -> "SkipButton":
+        return cls(guild_id=int(match["guild_id"]), year=int(match["year"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        uid = str(interaction.user.id)
+        storage.mark_skipped(self.guild_id, uid, self.year)
+        await interaction.response.edit_message(
+            content="Got it — your birthday announcement will be skipped this year. It'll resume next year automatically.",
+            view=None,
+        )
+
+
+class RemoveButton(discord.ui.DynamicItem[discord.ui.Button], template=r"bday:remove:(?P<guild_id>\d+)"):
+    def __init__(self, guild_id: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Remove me permanently",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"bday:remove:{guild_id}",
+            )
+        )
+        self.guild_id = guild_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match) -> "RemoveButton":
+        return cls(guild_id=int(match["guild_id"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        storage.remove_birthday(self.guild_id, interaction.user.id)
+        await interaction.response.edit_message(
+            content="You've been removed from birthday announcements. You can re-register anytime with `/birthday set`.",
+            view=None,
+        )
+
+
+def make_opt_out_view(guild_id: int, year: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(SkipButton(guild_id, year))
+    view.add_item(RemoveButton(guild_id))
+    return view
+
+
+# ── Bot ───────────────────────────────────────────────────────────────────────
+
 class BirthdayBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -36,6 +96,7 @@ class BirthdayBot(discord.Client):
         self._catchup_done = False
 
     async def setup_hook(self) -> None:
+        self.add_dynamic_items(SkipButton, RemoveButton)
         await self.tree.sync()
         log.info("Command tree synced globally (may take up to 1 hour to propagate)")
 
@@ -60,43 +121,28 @@ class BirthdayBot(discord.Client):
 client = BirthdayBot()
 
 
-# ── Opt-out view ──────────────────────────────────────────────────────────────
+# ── Global error handler ──────────────────────────────────────────────────────
 
-class OptOutView(discord.ui.View):
-    def __init__(self, guild_id: int, user_id: str, year: int) -> None:
-        super().__init__(timeout=None)
-        self.guild_id = guild_id
-        self.user_id = user_id
-        self.year = year
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+    if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+        msg = "You don't have permission to use this command."
+    else:
+        log.error("Unhandled command error: %s", error, exc_info=error)
+        msg = "Something went wrong. Please try again."
 
-    @discord.ui.button(label="Skip this year", style=discord.ButtonStyle.secondary)
-    async def skip_year(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        storage.mark_skipped(self.guild_id, self.user_id, self.year)
-        self.disable_all_buttons()
-        await interaction.response.edit_message(
-            content="Got it — your birthday announcement will be skipped this year. It'll resume next year automatically.",
-            view=self,
-        )
-
-    @discord.ui.button(label="Remove me permanently", style=discord.ButtonStyle.danger)
-    async def remove_permanently(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        storage.remove_birthday(self.guild_id, int(self.user_id))
-        self.disable_all_buttons()
-        await interaction.response.edit_message(
-            content="You've been removed from birthday announcements. You can re-register anytime with `/birthday set`.",
-            view=self,
-        )
-
-    def disable_all_buttons(self) -> None:
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+    except discord.HTTPException:
+        pass
 
 
-# ── Slash commands ────────────────────────────────────────────────────────────
+client.tree.on_error = on_app_command_error
 
-group = app_commands.Group(name="birthday", description="Birthday bot commands")
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def parse_birthday(value: str) -> Optional[str]:
     value = value.strip()
@@ -109,17 +155,33 @@ def parse_birthday(value: str) -> Optional[str]:
     return None
 
 
+def next_birthday_year(mmdd: str, today: datetime.date) -> int:
+    """Return the year of the next upcoming announcement for a given MM-DD."""
+    try:
+        bd = datetime.datetime.strptime(f"{today.year}-{mmdd}", "%Y-%m-%d").date()
+    except ValueError:
+        return today.year
+    return today.year if bd >= today else today.year + 1
+
+
+# ── Slash commands ────────────────────────────────────────────────────────────
+
+group = app_commands.Group(name="birthday", description="Birthday bot commands")
+
+
 @group.command(name="set", description="Register your birthday (e.g. 03-14, 03/14, January 16)")
 @app_commands.describe(date="Your birthday — try MM-DD, MM/DD, or 'January 16'")
 async def birthday_set(interaction: discord.Interaction, date: str) -> None:
+    await interaction.response.defer(ephemeral=True)
     mmdd = parse_birthday(date)
     if mmdd is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Couldn't parse that date. Try `03-14`, `03/14`, or `March 14`.", ephemeral=True
         )
         return
     storage.set_birthday(interaction.guild_id, interaction.user.id, mmdd)
-    await interaction.response.send_message(
+    storage.clear_wished(interaction.guild_id, str(interaction.user.id))
+    await interaction.followup.send(
         f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.",
         ephemeral=True,
     )
@@ -127,15 +189,29 @@ async def birthday_set(interaction: discord.Interaction, date: str) -> None:
 
 @group.command(name="remove", description="Remove your birthday and opt out of announcements")
 async def birthday_remove(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
     removed = storage.remove_birthday(interaction.guild_id, interaction.user.id)
     if removed:
-        await interaction.response.send_message(
-            "Your birthday has been removed.", ephemeral=True
-        )
+        await interaction.followup.send("Your birthday has been removed.", ephemeral=True)
     else:
-        await interaction.response.send_message(
-            "You don't have a birthday registered.", ephemeral=True
-        )
+        await interaction.followup.send("You don't have a birthday registered.", ephemeral=True)
+
+
+@group.command(name="skip", description="Skip this year's birthday announcement")
+async def birthday_skip(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    uid = str(interaction.user.id)
+    birthdays = storage.all_birthdays(interaction.guild_id)
+    if uid not in birthdays:
+        await interaction.followup.send("You don't have a birthday registered.", ephemeral=True)
+        return
+    today_et = datetime.datetime.now(ET).date()
+    year = next_birthday_year(birthdays[uid], today_et)
+    storage.mark_skipped(interaction.guild_id, uid, year)
+    await interaction.followup.send(
+        f"Got it — your birthday announcement will be skipped for {year}. It'll resume next year automatically.",
+        ephemeral=True,
+    )
 
 
 @group.command(name="channel", description="Set the channel for birthday announcements")
@@ -144,9 +220,10 @@ async def birthday_channel(
     interaction: discord.Interaction,
     channel: Optional[discord.TextChannel] = None,
 ) -> None:
+    await interaction.response.defer(ephemeral=True)
     target = channel or interaction.channel
     storage.set_channel(interaction.guild_id, target.id)
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"Birthday announcements will be posted in {target.mention}.", ephemeral=True
     )
 
@@ -172,9 +249,8 @@ async def birthday_list(interaction: discord.Interaction) -> None:
 
 @group.command(name="status", description="Show recent birthdays and whether notices were sent")
 @app_commands.describe(days="How many days back to check (default 7)")
-async def birthday_status(
-    interaction: discord.Interaction, days: int = 7
-) -> None:
+async def birthday_status(interaction: discord.Interaction, days: int = 7) -> None:
+    await interaction.response.defer(ephemeral=True)
     days = max(1, min(days, 30))
     today_et = datetime.datetime.now(ET).date()
     lines = []
@@ -197,11 +273,11 @@ async def birthday_status(
             lines.append(f"{status_icon} <@{uid}> — {mmdd} ({label})")
 
     if not lines:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"No birthdays in the last {days} day(s).", ephemeral=True
         )
     else:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"**Birthday status (last {days} day(s)):**\n" + "\n".join(lines),
             ephemeral=True,
         )
@@ -209,15 +285,18 @@ async def birthday_status(
 
 @group.command(name="admin-set", description="Set a birthday for another member")
 @app_commands.describe(member="The member to set a birthday for", date="Their birthday — e.g. 03-14, 03/14, or 'March 14'")
+@app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_admin_set(interaction: discord.Interaction, member: discord.Member, date: str) -> None:
+    await interaction.response.defer(ephemeral=True)
     mmdd = parse_birthday(date)
     if mmdd is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Couldn't parse that date. Try `03-14`, `03/14`, or `March 14`.", ephemeral=True
         )
         return
     storage.set_birthday(interaction.guild_id, member.id, mmdd)
-    await interaction.response.send_message(
+    storage.clear_wished(interaction.guild_id, str(member.id))
+    await interaction.followup.send(
         f"Birthday for {member.mention} set to **{mmdd}**.", ephemeral=True
     )
 
@@ -225,11 +304,13 @@ async def birthday_admin_set(interaction: discord.Interaction, member: discord.M
 @group.command(name="admin-clear", description="Reset all birthday data for this server")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_admin_clear(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
     storage.clear_guild(interaction.guild_id)
-    await interaction.response.send_message("All birthday data for this server has been cleared.", ephemeral=True)
+    await interaction.followup.send("All birthday data for this server has been cleared.", ephemeral=True)
 
 
 @group.command(name="preview", description="Send preview DMs now to anyone with a birthday in the next 7 days")
+@app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_preview(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
     today_et = datetime.datetime.now(ET).date()
@@ -238,6 +319,7 @@ async def birthday_preview(interaction: discord.Interaction) -> None:
 
 
 @group.command(name="announce", description="Trigger today's birthday announcements now")
+@app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_announce(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
     today_et = datetime.datetime.now(ET).date()
@@ -274,21 +356,19 @@ async def send_preview_dms(bot: discord.Client, guild: discord.Guild, today: dat
             if storage.was_skipped(guild.id, uid, year):
                 continue
 
-            member = guild.get_member(int(uid))
-            if member is None:
-                continue
-
-            days_away = offset
-            view = OptOutView(guild_id=guild.id, user_id=uid, year=year)
+            view = make_opt_out_view(guild_id=guild.id, year=year)
             try:
-                await member.send(
-                    f"👋 Hey! Just a heads up — your birthday ({mmdd}) is coming up in {days_away} day(s) "
+                user = await bot.fetch_user(int(uid))
+                await user.send(
+                    f"👋 Hey! Just a heads up — your birthday ({mmdd}) is coming up in {offset} day(s) "
                     f"and we'll be posting an announcement in **{guild.name}**. "
                     f"If you'd rather skip it this year or opt out entirely, use the buttons below.",
                     view=view,
                 )
                 storage.mark_preview_sent(guild.id, uid, year)
-                log.info("Sent preview DM to user %s in guild %s (%s days away)", uid, guild.id, days_away)
+                log.info("Sent preview DM to user %s in guild %s (%s days away)", uid, guild.id, offset)
+            except discord.NotFound:
+                log.warning("User %s not found, skipping preview DM", uid)
             except discord.Forbidden:
                 log.warning("Could not DM user %s (DMs disabled)", uid)
             except discord.HTTPException as e:
