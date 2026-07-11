@@ -51,7 +51,8 @@ class SkipButton(discord.ui.DynamicItem[discord.ui.Button], template=r"bday:skip
         uid = str(interaction.user.id)
         storage.mark_skipped(self.guild_id, uid, self.year)
         await interaction.response.edit_message(
-            content="Got it — your birthday announcement will be skipped this year. It'll resume next year automatically.",
+            content="Got it — your birthday announcement will be skipped this year. It'll resume next year automatically.\n"
+                    "You can also use `/birthday skip` or `/birthday remove` any time.",
             view=None,
         )
 
@@ -74,7 +75,7 @@ class RemoveButton(discord.ui.DynamicItem[discord.ui.Button], template=r"bday:re
     async def callback(self, interaction: discord.Interaction) -> None:
         storage.remove_birthday(self.guild_id, interaction.user.id)
         await interaction.response.edit_message(
-            content="You've been removed from birthday announcements. You can re-register anytime with `/birthday set`.",
+            content="You've been removed from birthday announcements. You can re-register anytime with `/birthday set` — only you'll see the response.",
             view=None,
         )
 
@@ -182,8 +183,7 @@ async def birthday_set(interaction: discord.Interaction, date: str) -> None:
     storage.set_birthday(interaction.guild_id, interaction.user.id, mmdd)
     storage.clear_wished(interaction.guild_id, str(interaction.user.id))
     await interaction.followup.send(
-        f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.\n"
-        f"-# Only you can see this message.",
+        f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.",
         ephemeral=True,
     )
 
@@ -211,6 +211,26 @@ async def birthday_skip(interaction: discord.Interaction) -> None:
     storage.mark_skipped(interaction.guild_id, uid, year)
     await interaction.followup.send(
         f"Got it — your birthday announcement will be skipped for {year}. It'll resume next year automatically.",
+        ephemeral=True,
+    )
+
+
+@group.command(name="help", description="How to use the birthday bot")
+async def birthday_help(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send(
+        "**Birthday Bot — Quick Guide**\n"
+        "All commands are private — only you can see the responses, and no one else sees you running them.\n\n"
+        "**Getting started**\n"
+        "`/birthday set <date>` — Register your birthday. Accepts `03-14`, `03/14`, or `March 14`.\n"
+        "`/birthday remove` — Remove yourself from announcements permanently.\n"
+        "`/birthday skip` — Skip just this year's announcement. You'll be included again next year.\n\n"
+        "**Other commands**\n"
+        "`/birthday list` — See everyone's registered birthdays.\n"
+        "`/birthday status` — See recent birthdays and whether they were announced.\n\n"
+        "**Privacy**\n"
+        "A week before your birthday, the bot will send you a private DM with the option to skip or remove yourself — "
+        "no need to run a command if you'd rather not be announced.",
         ephemeral=True,
     )
 
