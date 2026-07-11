@@ -397,7 +397,8 @@ async def birthday_welcome(interaction: discord.Interaction) -> None:
         note = "*(Announcements are posted in another channel — use `/birthday channel` to change it.)*"
     else:
         note = "*(No announcement channel set yet — an admin should run `/birthday channel`.)*"
-    await interaction.channel.send(_welcome_text(note))
+    channel = client.get_channel(interaction.channel_id)
+    await channel.send(_welcome_text(note))
     await interaction.followup.send("Posted the welcome message here.", ephemeral=True)
 
 
