@@ -390,14 +390,16 @@ async def birthday_announce(interaction: discord.Interaction) -> None:
 @app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_welcome(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
-    configured = storage.get_channel(interaction.guild_id)
-    if configured == interaction.channel_id:
-        note = "Birthday announcements are posted in this channel."
-    elif configured:
-        note = "*(Announcements are posted in another channel — use `/birthday channel` to change it.)*"
-    else:
-        note = "*(No announcement channel set yet — an admin should run `/birthday channel`.)*"
-    channel = client.get_channel(interaction.channel_id)
+    configured_id = storage.get_channel(interaction.guild_id)
+    channel = client.get_channel(configured_id) if configured_id else interaction.guild.system_channel
+    if channel is None:
+        await interaction.followup.send(
+            "No announcement channel is set and no system channel is available. "
+            "Use `/birthday channel` to configure one first.",
+            ephemeral=True,
+        )
+        return
+    note = f"Birthday announcements are posted in {channel.mention}."
     await channel.send(_welcome_text(note))
     await interaction.followup.send("Posted the welcome message here.", ephemeral=True)
 
