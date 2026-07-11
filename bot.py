@@ -33,6 +33,7 @@ class BirthdayBot(discord.Client):
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
+        self._catchup_done = False
 
     async def setup_hook(self) -> None:
         await self.tree.sync()
@@ -40,8 +41,10 @@ class BirthdayBot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id %s)", self.user, self.user.id)
-        if not daily_check.is_running():
+        if not self._catchup_done:
+            self._catchup_done = True  # set before any await — prevents concurrent on_ready races
             await self._run_catchup()
+        if not daily_check.is_running():
             daily_check.start(self)
 
     async def _run_catchup(self) -> None:
@@ -362,9 +365,9 @@ async def announce(
         if gif_url:
             msg = f"{msg}\n{gif_url}"
 
+        storage.mark_wished(guild.id, target_date, uid)
         try:
             await channel.send(msg)
-            storage.mark_wished(guild.id, target_date, uid)
             log.info(
                 "Announced %s birthday for user %s in guild %s (channel %s)",
                 "belated" if is_belated else "on-day",
