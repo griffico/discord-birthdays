@@ -213,9 +213,15 @@ async def fetch_birthday_gif() -> Optional[str]:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params) as resp:
+                log.info("Giphy response status: %s", resp.status)
                 if resp.status == 200:
                     data = await resp.json()
-                    return data["data"]["images"]["original"]["url"]
+                    gif_url = data["data"]["images"]["original"]["url"]
+                    log.info("Giphy GIF fetched: %s", gif_url)
+                    return gif_url
+                else:
+                    body = await resp.text()
+                    log.warning("Giphy error %s: %s", resp.status, body)
     except Exception as e:
         log.warning("Failed to fetch Giphy GIF: %s", e)
     return None
