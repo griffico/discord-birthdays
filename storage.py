@@ -119,6 +119,19 @@ def mark_preview_sent(guild_id: int, user_id: str, year: int) -> None:
     save()
 
 
+# ── Announcement time ─────────────────────────────────────────────────────────
+
+def get_announce_time(guild_id: int) -> tuple:
+    raw = _guild(guild_id).get("announce_time", "12:00")
+    h, m = raw.split(":")
+    return int(h), int(m)
+
+
+def set_announce_time(guild_id: int, hour: int, minute: int) -> None:
+    _guild(guild_id)["announce_time"] = f"{hour:02d}:{minute:02d}"
+    save()
+
+
 def clear_guild(guild_id: int) -> None:
     gid = str(guild_id)
     if gid in _data["guilds"]:

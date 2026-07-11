@@ -195,6 +195,18 @@ def parse_birthday(value: str) -> Optional[str]:
     return None
 
 
+def parse_time(value: str) -> Optional[tuple]:
+    """Parse a time string into (hour, minute) in 24-hour format, or None."""
+    value = value.strip().upper()
+    for fmt in ("%I:%M %p", "%H:%M", "%I %p", "%I%p"):
+        try:
+            dt = datetime.datetime.strptime(value, fmt)
+            return dt.hour, dt.minute
+        except ValueError:
+            continue
+    return None
+
+
 def next_birthday_year(mmdd: str, today: datetime.date) -> int:
     """Return the year of the next upcoming announcement for a given MM-DD."""
     try:
@@ -368,6 +380,44 @@ async def birthday_admin_clear(interaction: discord.Interaction) -> None:
     await interaction.followup.send("All birthday data for this server has been cleared.", ephemeral=True)
 
 
+@group.command(name="admin-time", description="Set the daily announcement time (ET)")
+@app_commands.describe(time="Time to post announcements, e.g. 9:00 AM, 14:30 (ET)")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def birthday_admin_time(interaction: discord.Interaction, time: str) -> None:
+    await interaction.response.defer(ephemeral=True)
+    parsed = parse_time(time)
+    if parsed is None:
+        await interaction.followup.send(
+            "Couldn't parse that time. Try `9:00 AM`, `09:00`, or `14:30`.", ephemeral=True
+        )
+        return
+    hour, minute = parsed
+    storage.set_announce_time(interaction.guild_id, hour, minute)
+    label = datetime.time(hour, minute).strftime("%-I:%M %p")
+    await interaction.followup.send(
+        f"Birthday announcements for this server will now go out at **{label} ET**.", ephemeral=True
+    )
+
+
+@group.command(name="unskip", description="Re-enable your birthday announcement after skipping")
+async def birthday_unskip(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    uid = str(interaction.user.id)
+    birthdays = storage.all_birthdays(interaction.guild_id)
+    if uid not in birthdays:
+        await interaction.followup.send("You don't have a birthday registered.", ephemeral=True)
+        return
+    today_et = datetime.datetime.now(ET).date()
+    year = next_birthday_year(birthdays[uid], today_et)
+    if not storage.was_skipped(interaction.guild_id, uid, year):
+        await interaction.followup.send("You don't have a skip set for this year.", ephemeral=True)
+        return
+    storage.clear_skip(interaction.guild_id, uid)
+    await interaction.followup.send(
+        f"Done — your birthday announcement is back on for {year}.", ephemeral=True
+    )
+
+
 @group.command(name="preview", description="Send preview DMs now to anyone with a birthday in the next 7 days")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_preview(interaction: discord.Interaction) -> None:
@@ -409,13 +459,16 @@ client.tree.add_command(group)
 
 # ── Daily scheduler ───────────────────────────────────────────────────────────
 
-@tasks.loop(time=datetime.time(hour=12, tzinfo=ET))
+@tasks.loop(minutes=1)
 async def daily_check(bot: discord.Client) -> None:
-    today_et = datetime.datetime.now(ET).date()
-    log.info("Daily check firing for %s", today_et)
+    now_et = datetime.datetime.now(ET)
+    today = now_et.date()
     for guild in bot.guilds:
-        await announce(bot, guild, today_et, today_et)
-        await send_preview_dms(bot, guild, today_et)
+        hour, minute = storage.get_announce_time(guild.id)
+        if now_et.hour == hour and now_et.minute == minute:
+            log.info("Daily check firing for guild %s at %02d:%02d ET", guild.id, hour, minute)
+            await announce(bot, guild, today, today)
+            await send_preview_dms(bot, guild, today)
 
 
 # ── Preview DMs ───────────────────────────────────────────────────────────────
