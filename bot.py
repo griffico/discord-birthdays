@@ -150,9 +150,10 @@ async def birthday_channel(
 
 @group.command(name="list", description="List all registered birthdays in this server")
 async def birthday_list(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
     birthdays = storage.all_birthdays(interaction.guild_id)
     if not birthdays:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "No birthdays registered yet. Use `/birthday set` to add yours!", ephemeral=True
         )
         return
@@ -161,7 +162,7 @@ async def birthday_list(interaction: discord.Interaction) -> None:
     for uid, mmdd in sorted(birthdays.items(), key=lambda x: x[1]):
         lines.append(f"<@{uid}> — {mmdd}")
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "**Registered birthdays:**\n" + "\n".join(lines), ephemeral=True
     )
 
