@@ -167,6 +167,21 @@ async def birthday_status(
         )
 
 
+@group.command(name="admin-set", description="Set a birthday for another member")
+@app_commands.describe(member="The member to set a birthday for", date="Their birthday — e.g. 03-14, 03/14, or 'March 14'")
+async def birthday_admin_set(interaction: discord.Interaction, member: discord.Member, date: str) -> None:
+    mmdd = parse_birthday(date)
+    if mmdd is None:
+        await interaction.response.send_message(
+            "Couldn't parse that date. Try `03-14`, `03/14`, or `March 14`.", ephemeral=True
+        )
+        return
+    storage.set_birthday(interaction.guild_id, member.id, mmdd)
+    await interaction.response.send_message(
+        f"Birthday for {member.mention} set to **{mmdd}**.", ephemeral=True
+    )
+
+
 @group.command(name="announce", description="Trigger today's birthday announcements now")
 async def birthday_announce(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
