@@ -49,6 +49,8 @@ def remove_birthday(guild_id: int, user_id: int) -> bool:
     if uid in g["birthdays"]:
         del g["birthdays"][uid]
         g.get("last_wished", {}).pop(uid, None)
+        g.get("skip_year", {}).pop(uid, None)
+        g.get("preview_sent", {}).pop(uid, None)
         save()
         return True
     return False
@@ -83,6 +85,33 @@ def mark_wished(guild_id: int, target_date: date, user_id: str) -> None:
 
 def last_wished_year(guild_id: int, user_id: str) -> Optional[int]:
     return _guild(guild_id).get("last_wished", {}).get(user_id)
+
+
+# ── Skip this year ────────────────────────────────────────────────────────────
+
+def was_skipped(guild_id: int, user_id: str, year: int) -> bool:
+    return _guild(guild_id).get("skip_year", {}).get(user_id) == year
+
+
+def mark_skipped(guild_id: int, user_id: str, year: int) -> None:
+    _guild(guild_id).setdefault("skip_year", {})[user_id] = year
+    save()
+
+
+def clear_skip(guild_id: int, user_id: str) -> None:
+    _guild(guild_id).get("skip_year", {}).pop(user_id, None)
+    save()
+
+
+# ── Preview DM tracking ───────────────────────────────────────────────────────
+
+def was_preview_sent(guild_id: int, user_id: str, year: int) -> bool:
+    return _guild(guild_id).get("preview_sent", {}).get(user_id) == year
+
+
+def mark_preview_sent(guild_id: int, user_id: str, year: int) -> None:
+    _guild(guild_id).setdefault("preview_sent", {})[user_id] = year
+    save()
 
 
 def all_guild_ids() -> list:

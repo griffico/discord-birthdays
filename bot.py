@@ -17,6 +17,7 @@ import storage
 load_dotenv()
 TOKEN = os.environ["DISCORD_TOKEN"]
 CATCHUP_DAYS = int(os.getenv("CATCHUP_DAYS", "7"))
+PREVIEW_DAYS = 7
 GIPHY_API_KEY = os.getenv("GIPHY_API_KEY")
 ET = ZoneInfo("America/New_York")
 
@@ -49,9 +50,44 @@ class BirthdayBot(discord.Client):
             target = today_et - datetime.timedelta(days=offset)
             for guild in self.guilds:
                 await announce(self, guild, target, today_et)
+        for guild in self.guilds:
+            await send_preview_dms(self, guild, today_et)
 
 
 client = BirthdayBot()
+
+
+# ── Opt-out view ──────────────────────────────────────────────────────────────
+
+class OptOutView(discord.ui.View):
+    def __init__(self, guild_id: int, user_id: str, year: int) -> None:
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.year = year
+
+    @discord.ui.button(label="Skip this year", style=discord.ButtonStyle.secondary)
+    async def skip_year(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        storage.mark_skipped(self.guild_id, self.user_id, self.year)
+        self.disable_all_buttons()
+        await interaction.response.edit_message(
+            content="Got it — your birthday announcement will be skipped this year. It'll resume next year automatically.",
+            view=self,
+        )
+
+    @discord.ui.button(label="Remove me permanently", style=discord.ButtonStyle.danger)
+    async def remove_permanently(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        storage.remove_birthday(self.guild_id, int(self.user_id))
+        self.disable_all_buttons()
+        await interaction.response.edit_message(
+            content="You've been removed from birthday announcements. You can re-register anytime with `/birthday set`.",
+            view=self,
+        )
+
+    def disable_all_buttons(self) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
 
 
 # ── Slash commands ────────────────────────────────────────────────────────────
@@ -201,6 +237,41 @@ async def daily_check(bot: discord.Client) -> None:
     log.info("Daily check firing for %s", today_et)
     for guild in bot.guilds:
         await announce(bot, guild, today_et, today_et)
+        await send_preview_dms(bot, guild, today_et)
+
+
+# ── Preview DMs ───────────────────────────────────────────────────────────────
+
+async def send_preview_dms(bot: discord.Client, guild: discord.Guild, today: datetime.date) -> None:
+    preview_date = today + datetime.timedelta(days=PREVIEW_DAYS)
+    mmdd = preview_date.strftime("%m-%d")
+    members = storage.birthdays_on(guild.id, mmdd)
+
+    for uid in members:
+        year = preview_date.year
+        if storage.was_preview_sent(guild.id, uid, year):
+            continue
+        if storage.was_skipped(guild.id, uid, year):
+            continue
+
+        member = guild.get_member(int(uid))
+        if member is None:
+            continue
+
+        view = OptOutView(guild_id=guild.id, user_id=uid, year=year)
+        try:
+            await member.send(
+                f"👋 Hey! Just a heads up — your birthday ({mmdd}) is coming up in {PREVIEW_DAYS} days "
+                f"and we'll be posting a announcement in **{guild.name}**. "
+                f"If you'd rather skip it this year or opt out entirely, use the buttons below.",
+                view=view,
+            )
+            storage.mark_preview_sent(guild.id, uid, year)
+            log.info("Sent preview DM to user %s in guild %s", uid, guild.id)
+        except discord.Forbidden:
+            log.warning("Could not DM user %s (DMs disabled)", uid)
+        except discord.HTTPException as e:
+            log.error("Failed to send preview DM to user %s: %s", uid, e)
 
 
 # ── Giphy ─────────────────────────────────────────────────────────────────────
@@ -258,6 +329,9 @@ async def announce(
 
     for uid in members:
         if storage.was_wished(guild.id, target_date, uid):
+            continue
+        if storage.was_skipped(guild.id, uid, target_date.year):
+            log.info("Skipping announcement for user %s (opted out this year)", uid)
             continue
 
         mention = f"<@{uid}>"
