@@ -109,6 +109,39 @@ class BirthdayBot(discord.Client):
         if not daily_check.is_running():
             daily_check.start(self)
 
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        channel = guild.system_channel
+        if channel is None or not channel.permissions_for(guild.me).send_messages:
+            channel = next(
+                (
+                    c for c in guild.text_channels
+                    if c.permissions_for(guild.me).send_messages
+                ),
+                None,
+            )
+        if channel is None:
+            log.warning("Joined guild %s but found no writable channel for welcome message", guild.id)
+            return
+
+        if not storage.get_channel(guild.id):
+            storage.set_channel(guild.id, channel.id)
+            channel_note = f"Birthday announcements will default to {channel.mention} — use `/birthday channel` to change it."
+        else:
+            channel_note = "*(Server admins: use `/birthday channel` to choose where announcements are posted.)*"
+
+        await channel.send(
+            "👋 **Thanks for adding Birthday Bot!**\n\n"
+            "Members can register their birthday with `/birthday set <date>` — try `March 14` or `03-14`. "
+            "Announcements go out automatically at noon ET.\n\n"
+            "• `/birthday set <date>` — register your birthday\n"
+            "• `/birthday remove` — opt out permanently\n"
+            "• `/birthday skip` — skip just this year\n"
+            "• `/birthday list` — see everyone's birthdays\n\n"
+            "All commands are private — only you can see the response.\n\n"
+            f"{channel_note}"
+        )
+        log.info("Sent welcome message to guild %s (channel %s)", guild.id, channel.id)
+
     async def _run_catchup(self) -> None:
         today_et = datetime.datetime.now(ET).date()
         for offset in range(CATCHUP_DAYS - 1, -1, -1):
