@@ -87,6 +87,22 @@ def make_opt_out_view(guild_id: int, year: int) -> discord.ui.View:
     return view
 
 
+# ── Welcome message ──────────────────────────────────────────────────────────
+
+def _welcome_text(channel_note: str) -> str:
+    return (
+        "👋 **Thanks for adding Birthday Bot!**\n\n"
+        "Members can register their birthday with `/birthday set <date>` — try `March 14` or `03-14`. "
+        "Announcements go out automatically at noon ET.\n\n"
+        "• `/birthday set <date>` — register your birthday\n"
+        "• `/birthday remove` — opt out permanently\n"
+        "• `/birthday skip` — skip just this year\n"
+        "• `/birthday list` — see everyone's birthdays\n\n"
+        "All commands are private — only you can see the response.\n\n"
+        f"{channel_note}"
+    )
+
+
 # ── Bot ───────────────────────────────────────────────────────────────────────
 
 class BirthdayBot(discord.Client):
@@ -129,17 +145,7 @@ class BirthdayBot(discord.Client):
         else:
             channel_note = "*(Server admins: use `/birthday channel` to choose where announcements are posted.)*"
 
-        await channel.send(
-            "👋 **Thanks for adding Birthday Bot!**\n\n"
-            "Members can register their birthday with `/birthday set <date>` — try `March 14` or `03-14`. "
-            "Announcements go out automatically at noon ET.\n\n"
-            "• `/birthday set <date>` — register your birthday\n"
-            "• `/birthday remove` — opt out permanently\n"
-            "• `/birthday skip` — skip just this year\n"
-            "• `/birthday list` — see everyone's birthdays\n\n"
-            "All commands are private — only you can see the response.\n\n"
-            f"{channel_note}"
-        )
+        await channel.send(_welcome_text(channel_note))
         log.info("Sent welcome message to guild %s (channel %s)", guild.id, channel.id)
 
     async def _run_catchup(self) -> None:
@@ -378,6 +384,21 @@ async def birthday_announce(interaction: discord.Interaction) -> None:
     today_et = datetime.datetime.now(ET).date()
     await announce(client, interaction.guild, today_et, today_et)
     await interaction.followup.send("Done — any unannounced birthdays today have been posted.", ephemeral=True)
+
+
+@group.command(name="welcome", description="Post the bot's welcome message in this channel")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def birthday_welcome(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    configured = storage.get_channel(interaction.guild_id)
+    if configured == interaction.channel_id:
+        note = "Birthday announcements are posted in this channel."
+    elif configured:
+        note = "*(Announcements are posted in another channel — use `/birthday channel` to change it.)*"
+    else:
+        note = "*(No announcement channel set yet — an admin should run `/birthday channel`.)*"
+    await interaction.channel.send(_welcome_text(note))
+    await interaction.followup.send("Posted the welcome message here.", ephemeral=True)
 
 
 client.tree.add_command(group)

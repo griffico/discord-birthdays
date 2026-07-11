@@ -16,6 +16,7 @@ A Discord bot that announces team birthdays at 8:00 AM Eastern Time. Members opt
 | `/birthday admin-clear` | Manage Server | Reset all birthday data for this server. |
 | `/birthday announce` | Manage Server | Trigger today's birthday announcements immediately. |
 | `/birthday preview` | Manage Server | Send preview DMs now to anyone with a birthday in the next 7 days. |
+| `/birthday welcome` | Manage Server | Re-post the bot's welcome/intro message in the current channel. |
 
 ## Setup
 
