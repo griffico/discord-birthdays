@@ -218,6 +218,14 @@ async def birthday_admin_set(interaction: discord.Interaction, member: discord.M
     )
 
 
+@group.command(name="preview", description="Send preview DMs now to anyone with a birthday in the next 7 days")
+async def birthday_preview(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    today_et = datetime.datetime.now(ET).date()
+    await send_preview_dms(client, interaction.guild, today_et)
+    await interaction.followup.send("Done — preview DMs sent to anyone with an upcoming birthday.", ephemeral=True)
+
+
 @group.command(name="announce", description="Trigger today's birthday announcements now")
 async def birthday_announce(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
