@@ -195,6 +195,16 @@ def parse_birthday(value: str) -> Optional[str]:
     return None
 
 
+def fmt_mmdd(mmdd: str) -> str:
+    """Format MM-DD as 'Feb 3'."""
+    return datetime.datetime.strptime(mmdd, "%m-%d").strftime("%b %-d")
+
+
+def fmt_date(d: datetime.date) -> str:
+    """Format a date as 'Feb 3, 2026'."""
+    return d.strftime("%b %-d, %Y")
+
+
 def parse_time(value: str) -> Optional[tuple]:
     """Parse a time string into (hour, minute) in 24-hour format, or None."""
     value = value.strip().upper()
@@ -234,7 +244,7 @@ async def birthday_set(interaction: discord.Interaction, date: str) -> None:
     storage.set_birthday(interaction.guild_id, interaction.user.id, mmdd)
     storage.clear_wished(interaction.guild_id, str(interaction.user.id))
     await interaction.followup.send(
-        f"Your birthday has been set to **{mmdd}**. You'll be announced at noon ET on that day.",
+        f"Your birthday has been set to **{fmt_mmdd(mmdd)}**. You'll be announced at noon ET on that day.",
         ephemeral=True,
     )
 
@@ -311,7 +321,7 @@ async def birthday_list(interaction: discord.Interaction) -> None:
 
     lines = []
     for uid, mmdd in sorted(birthdays.items(), key=lambda x: x[1]):
-        lines.append(f"<@{uid}> — {mmdd}")
+        lines.append(f"<@{uid}> — {fmt_mmdd(mmdd)}")
 
     await interaction.followup.send(
         "**Registered birthdays:**\n" + "\n".join(lines), ephemeral=True
@@ -340,8 +350,8 @@ async def birthday_status(interaction: discord.Interaction, days: int = 7) -> No
         for uid in members:
             wished = storage.was_wished(interaction.guild_id, target, uid)
             status_icon = "✅" if wished else "❌"
-            label = "today" if offset == 0 else target.isoformat()
-            lines.append(f"{status_icon} <@{uid}> — {mmdd} ({label})")
+            label = "today" if offset == 0 else fmt_date(target)
+            lines.append(f"{status_icon} <@{uid}> — {fmt_mmdd(mmdd)} ({label})")
 
     if not lines:
         await interaction.followup.send(
@@ -368,7 +378,7 @@ async def birthday_admin_set(interaction: discord.Interaction, member: discord.M
     storage.set_birthday(interaction.guild_id, member.id, mmdd)
     storage.clear_wished(interaction.guild_id, str(member.id))
     await interaction.followup.send(
-        f"Birthday for {member.mention} set to **{mmdd}**.", ephemeral=True
+        f"Birthday for {member.mention} set to **{fmt_mmdd(mmdd)}**.", ephemeral=True
     )
 
 
@@ -492,7 +502,7 @@ async def send_preview_dms(bot: discord.Client, guild: discord.Guild, today: dat
             try:
                 user = await bot.fetch_user(int(uid))
                 await user.send(
-                    f"👋 Hey! Just a heads up — your birthday ({mmdd}) is coming up in {offset} day(s) "
+                    f"👋 Hey! Just a heads up — your birthday ({fmt_mmdd(mmdd)}) is coming up in {offset} day(s) "
                     f"and we'll be posting an announcement in **{guild.name}**. "
                     f"If you'd rather skip it this year or opt out entirely, use the buttons below.",
                     view=view,
@@ -569,7 +579,7 @@ async def announce(
 
         mention = f"<@{uid}>"
         if is_belated:
-            msg = f"🎂 Belated happy birthday, {mention}! (Their birthday was {target_date.isoformat()})"
+            msg = f"🎂 Belated happy birthday, {mention}! (Their birthday was {fmt_date(target_date)})"
         else:
             msg = f"🎉 Happy birthday, {mention}!"
 
