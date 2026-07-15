@@ -427,13 +427,15 @@ async def birthday_preview(interaction: discord.Interaction) -> None:
     await interaction.followup.send("Done — preview DMs sent to anyone with an upcoming birthday.", ephemeral=True)
 
 
-@group.command(name="announce", description="Trigger today's birthday announcements now")
+@group.command(name="announce", description="Trigger birthday announcements now, including any belated notices")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def birthday_announce(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True)
     today_et = datetime.datetime.now(ET).date()
-    await announce(client, interaction.guild, today_et, today_et)
-    await interaction.followup.send("Done — any unannounced birthdays today have been posted.", ephemeral=True)
+    for offset in range(CATCHUP_DAYS - 1, -1, -1):
+        target = today_et - datetime.timedelta(days=offset)
+        await announce(client, interaction.guild, target, today_et)
+    await interaction.followup.send("Done — any unannounced birthdays (including belated) have been posted.", ephemeral=True)
 
 
 @group.command(name="welcome", description="Post the bot's welcome message in this channel")
